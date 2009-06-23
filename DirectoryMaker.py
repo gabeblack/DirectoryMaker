@@ -84,6 +84,18 @@ TBFLAGS = ( wx.TB_HORIZONTAL
             | wx.NO_BORDER
             | wx.TB_FLAT
             )
+def firstNamesOnly( names ):
+   if isinstance(names, str):
+       parts = names.split(" ")
+       return parts[0]
+   else:
+       parts = ', '.join(names)
+       parts = parts.split(', ')
+       for i in range(0,len(parts)):
+           parts[i]=firstNamesOnly( parts[i] )
+       return parts
+   
+
 
 # Throughout the file misc1 I have holding the emails when imported from MLS or the ward website, and misc2 contains the children
 class tOptionsDialog(wx.Dialog):
@@ -267,6 +279,41 @@ class MainWindow(wx.Frame):
         self.saveProject()
 
     def OnExportPDF(self,e):
+       result = warningBox( self, "Export with Photos?")
+       if result == wx.ID_YES:
+          self.OnExportPhotoPDF(e)
+       else:
+          self.OnExportTextPDF(e)
+
+    def OnExportTextPDF(self,e):
+        author = "Gabe Black"
+        (f,fname) = tempfile.mkstemp(suffix='.pdf',prefix=self.projectName)
+        c = canvas.Canvas(fname)
+        os.close(f)
+        c.setAuthor( author )
+        familyId, cookie = self.tree.GetFirstChild(self.root)
+        i = 0
+        self.pdfCreator.initTextDirectory(c)
+        while(familyId.IsOk()):
+            familyData = self.tree.GetPyData(familyId)
+            self.pdfCreator.calcMargins(c,familyData,i)
+            i += 1
+            familyId, cookie = self.tree.GetNextChild(self.root, cookie)
+        familyId, cookie = self.tree.GetFirstChild(self.root)
+        i = 0
+        while(familyId.IsOk()):
+            familyData = self.tree.GetPyData(familyId)
+            self.pdfCreator.drawFamily(c,familyData,i)
+            i += 1
+            familyId, cookie = self.tree.GetNextChild(self.root, cookie)
+        self.pdfCreator.finalizeTextDirectory(c,i)
+        c.save()
+        if "wxGTK" in wx.PlatformInfo:
+            os.system("gnome-open \"" + fname + "\"")
+        else:
+            os.startfile(fname)
+
+    def OnExportPhotoPDF(self,e):
         author = "Gabe Black"
         familyId, cookie = self.tree.GetFirstChild(self.root)
         i = 0
@@ -289,7 +336,10 @@ class MainWindow(wx.Frame):
         if (i%(self.pdfCreator.numRows*self.pdfCreator.numCols)) != 0:
             self.pdfCreator.showPage(c)
         c.save()
-        os.startfile(fname)
+        if "wxGTK" in wx.PlatformInfo:
+            os.system("gnome-open \"" + fname + "\"")
+        else:
+            os.startfile(fname)
 
     def parseName( self, name ):
         if name:
@@ -303,6 +353,8 @@ class MainWindow(wx.Frame):
             return ("","")
 
     def OnImportCSV(self, e):
+        # Since this csv portion is for LDS ward website csv and MLS csv files, I try and be a little "smart"
+        # by not importing middle names (seems to be too noisy if not)
         while True:
             dlg = wx.FileDialog(self, "Choose a file", self.dirname, "", "CSV Files (*.csv)|*.csv", wx.OPEN)
             if dlg.ShowModal() == wx.ID_OK:
@@ -323,14 +375,14 @@ class MainWindow(wx.Frame):
                         
                         if entry["HH Position"] == "Head of Household":
                             ward[id].familyName = familyName
-                            ward[id].fatherName = firstName
+                            ward[id].fatherName = firstNamesOnly(firstName)
                             ward[id].fatherPhone = entry["Phone 2"]
                             if ward[id].misc1:
                                 ward[id].misc1 = entry["E-mail Address"] + " " + ward[id].misc1
                             else:
                                 ward[id].misc1 = entry["E-mail Address"]
                         elif entry["HH Position"] == "Spouse":
-                            ward[id].motherName = firstName
+                            ward[id].motherName = firstNamesOnly(firstName)
                             ward[id].motherPhone = entry["Phone 2"]
                             if ward[id].misc1:
                                 ward[id].misc1 += " " + entry["E-mail Address"]
@@ -338,9 +390,9 @@ class MainWindow(wx.Frame):
                                 ward[id].misc1 = entry["E-mail Address"]
                         else: #child
                             if ward[id].misc2:
-                                ward[id].misc2 += " " + firstName
+                                ward[id].misc2 += " " + firstNamesOnly(firstName)
                             else:
-                                ward[id].misc2 = firstName
+                                ward[id].misc2 = firstNamesOnly(firstName)
                                 
                     for k,family in ward.iteritems():
                         self.tree.AppendItem(self.root, str(family), data=wx.TreeItemData(family) )
@@ -360,7 +412,7 @@ class MainWindow(wx.Frame):
                             (fatherName, misc1) = self.parseName(i.next())
                             if parents.find('and') != -1:
                                 (motherName, motherEmail) = self.parseName(i.next())
-                            misc2 = ', '.join(i)
+                            misc2 = ', '.join(firstNamesOnly(i))
                             if misc1 != "" and motherEmail != "":
                                 misc1 = misc1 + " " + motherEmail
                         except StopIteration:
@@ -368,9 +420,9 @@ class MainWindow(wx.Frame):
                         family = tFamily( familyName,
                                           address,
                                           phone,
-                                          fatherName,
+                                          firstNamesOnly(fatherName),
                                           "",
-                                          motherName,
+                                          firstNamesOnly(motherName),
                                           "",
                                           misc1,
                                           misc2,
@@ -981,7 +1033,7 @@ class tPDFCreator():
         self.width=(self.pageWidth-(self.xSpacing*(self.numCols+1)))/self.numCols
         self.height=(self.pageHeight-(self.ySpacing*(self.numRows+1)))/self.numRows
 
-    def Y(self,y,h):
+    def Y(self,y,h=20):
         return self.pageHeight-y-h
         
     def getBoundedRatio(self, w, h, windowW, windowH):
@@ -991,7 +1043,75 @@ class tPDFCreator():
             return ratio1
         else:
             return ratio2
-        
+    def initTextDirectory(self,c):
+        self.maxNameSize = 0
+        self.maxAddressSize = 0
+        self.maxPhoneSize = 0
+        self.leftMargin = 0
+        self.maxTotal = 0
+        self.fontSize = 9
+        c.setFont( "Helvetica", self.fontSize )
+        self.lineSpacing=self.fontSize+int(.15*self.fontSize)
+        self.numPerPage = int((self.pageHeight-20)/self.lineSpacing)
+        self.colSpacing=10
+
+    def finalizeTextDirectory(self,c,i):
+        if (i%self.numPerPage) != 0:
+            self.showPage(c)
+    def getFamilyName(self, familyData):
+        famName = familyData.familyName + ", "
+        if familyData.fatherName and familyData.motherName:
+            famName = famName + familyData.fatherName + " and " + familyData.motherName
+        else:
+            famName = famName + familyData.fatherName + familyData.motherName
+        return famName
+
+    def calcMargins(self,c,familyData,index):
+        famName = self.getFamilyName(familyData)
+        self.maxNameSize = max(self.maxNameSize, c.stringWidth(famName))
+        self.maxAddressSize = max(self.maxAddressSize, c.stringWidth(familyData.address))
+        self.maxPhoneSize = max(self.maxPhoneSize, c.stringWidth(self.getPhoneStrings(familyData)))
+        self.leftMargin = (self.pageWidth - (self.maxNameSize + self.maxAddressSize + self.maxPhoneSize + (self.colSpacing*2)))/2
+
+
+    def drawName(self,c,familyData,index):
+        famName = self.getFamilyName(familyData)
+        x = self.leftMargin
+        c.drawString(x, self.Y((index%self.numPerPage)*self.lineSpacing), famName)
+
+    def getPhoneStrings(self, familyData):
+        retVal = ""
+        if familyData.homePhone:
+            retVal += "%s"%familyData.homePhone
+        if familyData.fatherPhone and familyData.motherPhone:
+            retVal = "%s %c:%s %c:%s"%(retVal,familyData.fatherName[0],familyData.fatherPhone,familyData.motherName[0],familyData.motherPhone)
+        else:
+            if familyData.fatherPhone or familyData.motherPhone:
+                retVal = "%s C:%s"%(retVal, familyData.fatherPhone + familyData.motherPhone)
+        return retVal
+
+    def drawPhone(self,c,familyData,index):
+        if familyData.address:
+            x = self.leftMargin + self.maxNameSize + self.colSpacing + self.maxAddressSize + self.colSpacing
+            phone = self.getPhoneStrings(familyData)
+            c.drawString(x, self.Y((index%self.numPerPage)*self.lineSpacing), phone)
+
+    def drawAddress(self,c,familyData,index):
+        if familyData.address:
+            x = self.leftMargin + self.maxNameSize + self.colSpacing
+            c.drawString(x, self.Y((index%self.numPerPage)*self.lineSpacing), familyData.address)
+    def drawFamily(self,c,familyData,index):
+        if index%2:
+            c.setFillColorRGB(.9,.9,.9)
+            c.rect(self.leftMargin-2,self.Y((index%self.numPerPage)*self.lineSpacing+(self.lineSpacing-self.fontSize)), self.pageWidth-(self.leftMargin*2)+4, self.lineSpacing,0,1)
+        c.setFillColorRGB(0,0,0)
+        self.drawName(c,familyData,index)
+        self.drawAddress(c,familyData,index)
+        self.drawPhone(c,familyData,index)
+        if ((index+1)%self.numPerPage) == 0:
+            self.showPage(c)
+            c.setFont( "Helvetica", self.fontSize )
+                              
     def createFamily(self,c,familyData,img,row,col):
         nameSize = self.fontSettings[ID_NAME_FONT][FONT].GetPointSize()
         addressSize = self.fontSettings[ID_ADDRESS_FONT][FONT].GetPointSize()
@@ -1179,6 +1299,8 @@ def runTest(frame, nb, log):
     win = TestAdjustChannels(nb, log)
     return win
 
+                                                          
+                                                            
 #reportlab.rl_config.warnOnMissingFontGlyphs = 0
 app = wx.PySimpleApp()
 frame = MainWindow(None, -1, "Directory Maker")

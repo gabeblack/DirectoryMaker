@@ -16,7 +16,16 @@
     along with Directory Maker.  If not, see <http://www.gnu.org/licenses/>.
 
 
-DirectoryMaker requires reportlab and wxpython. After installing those packages run:
+DirectoryMaker's current use is to create a Ward Photo Directory or a simple Ward Directory (without photos).  It has features to allow you to import contact information from both MLS exports or CSV exports (from an LDS Ward website).
+
+INSTALLATION:
+
+DirectoryMaker has a Windows installer.  It can be downloaded from http://DirectoryMaker.blogspot.com.  
+
+
+   OR
+
+You may run DirectoryMaker from source.  To do this it requires reportlab and wxpython. After installing those packages run:
 
    python DirectoryMaker.py
 

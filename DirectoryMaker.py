@@ -51,15 +51,14 @@ from icons.openProject import openProject
 from icons.noImage import noImage
 from icons.taskbarIcon import taskbarIcon
 from icons.imgFrame import imgFrame
+from icons.imgFrame2 import imgFrame2
 
 # reportlab does the PDF generation
 from reportlab.pdfgen import canvas
 from reportlab.lib import fontfinder
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-
-
-
+from reportlab.lib import pagesizes
 ID_ABOUT=101
 ID_OPEN=102
 ID_NEW=103
@@ -79,6 +78,8 @@ COLOR=0
 FONT=1
 SIZE=2
 
+NORMAL_FRAME=0
+CUTOUT_FRAME=1
 
 TBFLAGS = ( wx.TB_HORIZONTAL
             | wx.NO_BORDER
@@ -114,13 +115,22 @@ class tOptionsDialog(wx.Dialog):
         self.xSpacing = self.addCtrl( boxSizer1, 0, " Horizontal Spacing:", str(pdfCreator.xSpacing))
         self.ySpacing = self.addCtrl( boxSizer1, 0, " Vertical Spacing:", str(pdfCreator.ySpacing))
 
+        self.frameStyle = wx.RadioBox( self, -1, "Frame Style", wx.DefaultPosition, wx.DefaultSize, ['Normal Frame','Cutout Frame'], 2, wx.RA_SPECIFY_COLS )
+        self.frameStyle.SetToolTip(wx.ToolTip("Only one 'Misc' field is available using the 'Normal Frame'.\nBoth 'Misc' fields are available using the 'Cutout Frame'"))
+        self.Bind(wx.EVT_RADIOBOX, self.OnSelectFrameStyle, self.frameStyle) 
+        self.frameStyle.SetSelection(pdfCreator.frameStyle)
+        
         box = wx.StaticBox(self, -1, "Show Optional Fields")
         boxSizer2 = wx.StaticBoxSizer(box, wx.VERTICAL)
         hSizer = wx.BoxSizer(wx.HORIZONTAL)
         self.misc1 = wx.CheckBox(self, -1, " Show Misc1 Field")
         self.misc1.SetValue( pdfCreator.showMisc1 )
         self.misc2 = wx.CheckBox(self, -1, " Show Misc2 Field")
+        self.Bind(wx.EVT_CHECKBOX, self.OnMiscCheckBox, self.misc1)
+        self.Bind(wx.EVT_CHECKBOX, self.OnMiscCheckBox, self.misc2)
         self.misc2.SetValue( pdfCreator.showMisc2 )
+        if self.misc1.GetValue() and self.misc2.GetValue() and pdfCreator.frameStyle == NORMAL_FRAME:
+           self.misc2.SetValue(False)
         hSizer.Add(self.misc1, 0, wx.ALL|wx.ALIGN_CENTER, 5)
         hSizer.Add((1,0), 1, wx.EXPAND)
         hSizer.Add(self.misc2, 0, wx.ALL|wx.ALIGN_CENTER_HORIZONTAL|wx.ALIGN_RIGHT, 5)
@@ -135,6 +145,7 @@ class tOptionsDialog(wx.Dialog):
         self.misc2Text = self.addCtrl( boxSizer3, ID_MISC2_FONT, "Misc 2 Font", "Miscellaneous 2")
 
         sizer.Add(boxSizer1, 0, wx.GROW|wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
+        sizer.Add(self.frameStyle, 0, wx.GROW|wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
         sizer.Add(boxSizer2, 0, wx.GROW|wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
         sizer.Add(boxSizer3, 0, wx.GROW|wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5)
         line = wx.StaticLine(self, -1, size=(50,-1), style=wx.LI_HORIZONTAL)
@@ -191,6 +202,18 @@ class tOptionsDialog(wx.Dialog):
         self.misc2Text.SetForegroundColour(self.fontSettings[ID_MISC2_FONT][COLOR])
         self.misc2Text.SetFont( self.fontSettings[ID_MISC2_FONT][FONT] )
         
+    def OnSelectFrameStyle(self,e):
+        if self.misc1.GetValue() and self.misc2.GetValue():
+           self.misc2.SetValue(False)
+
+    def OnMiscCheckBox(self,e):
+        cb = e.GetEventObject()
+        if self.frameStyle.GetSelection() == NORMAL_FRAME and e.IsChecked():
+           if cb == self.misc1:
+              self.misc2.SetValue(False)
+           else:
+              self.misc1.SetValue(False)
+
     def OnSelectFont(self,e):
         data = wx.FontData()
         data.EnableEffects(True)
@@ -318,7 +341,7 @@ class MainWindow(wx.Frame):
         familyId, cookie = self.tree.GetFirstChild(self.root)
         i = 0
         (f,fname) = tempfile.mkstemp(suffix='.pdf',prefix=self.projectName)
-        c = canvas.Canvas(fname)
+        c = canvas.Canvas(fname,(pagesizes.A4))
         os.close(f)
         c.setAuthor( author )
         self.pdfCreator.embedFonts(c)
@@ -445,7 +468,7 @@ class MainWindow(wx.Frame):
             self.pdfCreator.fontSettings = dict(dlg.fontSettings)
             self.pdfCreator.setOptions(int(dlg.rows.GetValue()), int(dlg.cols.GetValue()),
                                        int(dlg.xSpacing.GetValue()), int(dlg.ySpacing.GetValue()),
-                                       dlg.misc1.GetValue(), dlg.misc2.GetValue())
+                                       dlg.misc1.GetValue(), dlg.misc2.GetValue(), dlg.frameStyle.GetSelection())
             self.projectDirty = True
         dlg.Destroy()
 
@@ -942,17 +965,17 @@ class ImageFrame(wx.Window):
 class tPDFCreator():
     def __init__(self, settings=None):
         self.author="Gabe Black http://DirectoryMaker.blogspot.com"
-        self.pageWidth=595.27
-        self.pageHeight=841.89
+        (self.pageWidth,self.pageHeight)=(pagesizes.A4)
         self.numRows = 5
         self.numCols = 4
         self.xSpacing = 10
         self.ySpacing = 10
         self.frameImg = os.path.join(tempfile.gettempdir(),"DirectoryDefaultFrame.png")
+        self.frameImg2 = os.path.join(tempfile.gettempdir(),"DirectoryDefaultFrame2.png")
         self.defaultImg = os.path.join(tempfile.gettempdir(),"DirectoryDefaultImage.jpg")
+        imgFrame2.GetImage().SaveFile( self.frameImg2, wx.BITMAP_TYPE_PNG )
         imgFrame.GetImage().SaveFile( self.frameImg, wx.BITMAP_TYPE_PNG )
         noImage.GetImage().SaveFile( self.defaultImg, wx.BITMAP_TYPE_JPEG )
-        self.yAdjust = -10
         self.ff = getFontCache()
 
         self.frameWidth = 680.0
@@ -963,7 +986,7 @@ class tPDFCreator():
         self.frameImgY = 130.0
         self.framePhoneY = 136.0
         self.framePhoneX = 376.0
-        self.yAdjust = -10
+        self.yAdjust = 10
 
         self.phoneRatioX = 1.0 * self.framePhoneX / self.frameWidth
         self.phoneRatioY = 1.0 * self.framePhoneY / self.frameHeight
@@ -978,6 +1001,7 @@ class tPDFCreator():
                              }
         self.showMisc1 = True
         self.showMisc2 = True
+        self.frameStyle = NORMAL_FRAME
         if settings:
             self.setSettings(settings)
         else:
@@ -988,7 +1012,7 @@ class tPDFCreator():
         return wxFont
         
     def setDefaultOptions( self ):
-        self.setOptions(self.numRows,self.numCols,self.xSpacing,self.ySpacing,self.showMisc1,self.showMisc2)
+        self.setOptions(self.numRows,self.numCols,self.xSpacing,self.ySpacing,self.showMisc1,self.showMisc2,self.frameStyle)
         
     def getSettings( self ):
         return [self.fontSettings[ID_NAME_FONT][FONT].GetNativeFontInfo().ToString(),
@@ -1002,7 +1026,8 @@ class tPDFCreator():
                 self.fontSettings[ID_MISC1_FONT][COLOR],
                 self.fontSettings[ID_MISC2_FONT][COLOR],
                 self.showMisc1, self.showMisc2,
-                self.numRows, self.numCols, self.xSpacing, self.ySpacing]
+                self.numRows, self.numCols, self.xSpacing, self.ySpacing, 
+                self.frameStyle] # added in 1.2
 
     def setSettings( self, settings ):
         self.fontSettings[ID_NAME_FONT][FONT] = wx.FontFromNativeInfoString( settings[0] )
@@ -1021,9 +1046,14 @@ class tPDFCreator():
         self.numCols = settings[13]
         self.xSpacing = settings[14]
         self.ySpacing = settings[15]
+        if len(settings) > 16:
+           self.frameStyle = settings[16]
+        else:
+           self.frameStyle = 0
+    
         self.setDefaultOptions()
 
-    def setOptions( self, nRows, nCols, xSpace, ySpace, showMisc1, showMisc2 ):
+    def setOptions( self, nRows, nCols, xSpace, ySpace, showMisc1, showMisc2, frameStyle ):
         self.numRows = nRows
         self.numCols = nCols
         self.xSpacing = xSpace
@@ -1032,6 +1062,7 @@ class tPDFCreator():
         self.showMisc2 = showMisc2
         self.width=(self.pageWidth-(self.xSpacing*(self.numCols+1)))/self.numCols
         self.height=(self.pageHeight-(self.ySpacing*(self.numRows+1)))/self.numRows
+        self.frameStyle = frameStyle
 
     def Y(self,y,h=20):
         return self.pageHeight-y-h
@@ -1119,7 +1150,7 @@ class tPDFCreator():
         misc1Size = self.fontSettings[ID_MISC1_FONT][FONT].GetPointSize()
         misc2Size = self.fontSettings[ID_MISC2_FONT][FONT].GetPointSize()
         x = self.xSpacing+((self.xSpacing+self.width)*col)
-        y = self.Y(self.ySpacing + ((self.ySpacing+self.height)*row)+self.yAdjust, self.height)
+        y = self.Y(((self.ySpacing+self.height)*row) + self.yAdjust, self.height)
         if img is None:
             img = self.defaultImg
         im = Image.open(img)
@@ -1150,39 +1181,43 @@ class tPDFCreator():
         nameY = imgY - nameSize - ySpace
         
         c.drawImage(img,imgX,imgY,imgW,imgH,None,False)
-        c.drawImage(self.frameImg,frameX,frameY,frameW,frameH,[0,1,0,1,0,1],False)
+        if self.frameStyle == NORMAL_FRAME:
+           c.drawImage(self.frameImg,frameX,frameY,frameW,frameH,[0,1,0,1,0,1],False)
+        else:
+           c.drawImage(self.frameImg2,frameX,frameY,frameW,frameH,[0,1,0,1,0,1],False)
 
-        # show phone
-        if familyData.homePhone and familyData.fatherPhone and familyData.motherPhone:
-            # teeny weeny font size... doh!
-            phoneSize = phoneSize/2.0
-            self.setFont( c, ID_PHONE_FONT, phoneSize )
-            c.drawString(phoneX,phoneY+phoneSize,familyData.homePhone)
-            c.drawString(phoneX,phoneY,familyData.fatherPhone)
-            c.drawString(phoneX,phoneY-phoneSize,familyData.motherPhone)
-        elif familyData.homePhone:
-            if familyData.fatherPhone or familyData.motherPhone:
-                phoneSize = phoneSize/1.5
-                phoneGap = phoneSize / 2.0
-                self.setFont( c, ID_PHONE_FONT, phoneSize )
-                phone2 = familyData.fatherPhone + familyData.motherPhone
-                c.drawString(phoneX,phoneY+phoneGap,familyData.homePhone)
-                c.drawString(phoneX,phoneY-phoneGap,phone2)
-            else:
-                self.setFont( c, ID_PHONE_FONT )
-                c.drawString(phoneX,phoneY,familyData.homePhone)
-        elif familyData.fatherPhone:
-            if familyData.motherPhone:
-                phoneSize = phoneSize/2.0
-                self.setFont( c, ID_PHONE_FONT, phoneSize )
-                c.drawString(phoneX,phoneY+phoneSize,familyData.fatherPhone)
-                c.drawString(phoneX,phoneY,familyData.motherPhone)
-            else:
-                self.setFont( c, ID_PHONE_FONT )
-                c.drawString(phoneX,phoneY,familyData.fatherPhone)
-        elif familyData.motherPhone:
-            self.setFont( c, ID_PHONE_FONT )
-            c.drawString(phoneX,phoneY,familyData.motherPhone)
+        # show phone in cutout if frameStyle == cutout
+        if self.frameStyle == CUTOUT_FRAME:
+           if familyData.homePhone and familyData.fatherPhone and familyData.motherPhone:
+              # teeny weeny font size... doh!
+              phoneSize = phoneSize/2.0
+              self.setFont( c, ID_PHONE_FONT, phoneSize )
+              c.drawString(phoneX,phoneY+phoneSize,familyData.homePhone)
+              c.drawString(phoneX,phoneY,familyData.fatherPhone)
+              c.drawString(phoneX,phoneY-phoneSize,familyData.motherPhone)
+           elif familyData.homePhone:
+              if familyData.fatherPhone or familyData.motherPhone:
+                 phoneSize = phoneSize/1.5
+                 phoneGap = phoneSize / 2.0
+                 self.setFont( c, ID_PHONE_FONT, phoneSize )
+                 phone2 = familyData.fatherPhone + familyData.motherPhone
+                 c.drawString(phoneX,phoneY+phoneGap,familyData.homePhone)
+                 c.drawString(phoneX,phoneY-phoneGap,phone2)
+              else:
+                 self.setFont( c, ID_PHONE_FONT )
+                 c.drawString(phoneX,phoneY,familyData.homePhone)
+           elif familyData.fatherPhone:
+              if familyData.motherPhone:
+                 phoneSize = phoneSize/2.0
+                 self.setFont( c, ID_PHONE_FONT, phoneSize )
+                 c.drawString(phoneX,phoneY+phoneSize,familyData.fatherPhone)
+                 c.drawString(phoneX,phoneY,familyData.motherPhone)
+              else:
+                 self.setFont( c, ID_PHONE_FONT )
+                 c.drawString(phoneX,phoneY,familyData.fatherPhone)
+           elif familyData.motherPhone:
+              self.setFont( c, ID_PHONE_FONT )
+              c.drawString(phoneX,phoneY,familyData.motherPhone)
 
         # show name
         self.setFont( c, ID_NAME_FONT )
@@ -1202,11 +1237,21 @@ class tPDFCreator():
             self.setFont( c, ID_MISC2_FONT )
             self.drawCenteredString(c, x, misc1Y, familyData.misc1)
 
+        misc2Y = misc1Y
         if self.showMisc2 and familyData.misc2:
             misc2Y = misc1Y - misc2Size - ySpace
             self.setFont( c, ID_MISC2_FONT )
             self.drawCenteredString(c, x, misc2Y, familyData.misc2)
 
+        if self.frameStyle == NORMAL_FRAME:
+            phoneY = misc2Y - phoneSize - ySpace
+            self.setFont( c, ID_PHONE_FONT )
+            phones = list()
+            if familyData.homePhone: phones.append("H: " + familyData.homePhone)
+            if familyData.fatherPhone: phones.append(("%c: "%familyData.fatherName[0])+familyData.fatherPhone)
+            if familyData.motherPhone: phones.append(("%c: "%familyData.motherName[0])+familyData.motherPhone)
+            self.drawCenteredString(c, x, phoneY, ' '.join(phones))
+           
     def drawCenteredString( self, c, x, y, text ):
         w = c.stringWidth( text )
         c.drawString(x+((self.width - w)/2),y,text)
